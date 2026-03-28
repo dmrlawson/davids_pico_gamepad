@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - name: Check out Pico SDK
+        uses: actions/checkout@v4
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: '2.2.0'
+          path: pico-sdk
+          submodules: true
+
+      - name: Build
+        env:
+          PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+        run: |
+          mkdir build && cd build
+          cmake -DPICO_BOARD=pico2_w -DPROJECT_VERSION=${{ github.ref_name }} ..
+          make -j$(nproc)
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/davids_pico_gamepad.uf2
+          name: ${{ github.ref_name }}

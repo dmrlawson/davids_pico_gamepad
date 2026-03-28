@@ -41,7 +41,10 @@ add_executable(davids_pico_gamepad
 )
 
 pico_set_program_name(davids_pico_gamepad "davids_pico_gamepad")
-pico_set_program_version(davids_pico_gamepad "0.1")
+if(NOT DEFINED PROJECT_VERSION)
+    set(PROJECT_VERSION "dev")
+endif()
+pico_set_program_version(davids_pico_gamepad "${PROJECT_VERSION}")
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(davids_pico_gamepad 1)
