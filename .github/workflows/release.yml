@@ -11,6 +11,10 @@ jobs:
     permissions:
       contents: write
 
+    strategy:
+      matrix:
+        board: [pico_w, pico2_w]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,11 +36,12 @@ jobs:
           PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
         run: |
           mkdir build && cd build
-          cmake -DPICO_BOARD=pico2_w -DPROJECT_VERSION=${{ github.ref_name }} ..
+          cmake -DPICO_BOARD=${{ matrix.board }} -DPROJECT_VERSION=${{ github.ref_name }} ..
           make -j$(nproc)
+          cp davids_pico_gamepad.uf2 davids_pico_gamepad-${{ matrix.board }}-${{ github.ref_name }}.uf2
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/davids_pico_gamepad.uf2
+          files: build/davids_pico_gamepad-${{ matrix.board }}-${{ github.ref_name }}.uf2
           name: ${{ github.ref_name }}
