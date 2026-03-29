@@ -312,14 +312,18 @@ static void start_scan(void) {
 static void ui_timer_handler(btstack_timer_source_t * ts) {
     static bool led_on = false;
     static uint32_t hb = 0;
+    static uint32_t blink_tick = 0;
     if (++hb >= 1000) { hb = 0; DEBUG_LOG("[C0] State: %d\n", (int)app_state); }
 
-    if (app_state == STATE_CONNECTED)
+    if (app_state == STATE_CONNECTED) {
         led_on = true;
-    else if (app_state >= STATE_SCANNING && app_state <= STATE_HANDSHAKE_2)
-        led_on = !led_on;
-    else
+        blink_tick = 0;
+    } else if (app_state >= STATE_SCANNING && app_state <= STATE_HANDSHAKE_2) {
+        if (++blink_tick >= 50) { blink_tick = 0; led_on = !led_on; } // 50 × 5ms = 250ms
+    } else {
         led_on = false;
+        blink_tick = 0;
+    }
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
 
     if (rumble_dirty && app_state == STATE_CONNECTED && hid_host_cid != 0) {
