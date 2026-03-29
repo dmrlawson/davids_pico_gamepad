@@ -269,7 +269,7 @@ static gamepad_driver_t nso_n64_driver = {
 // Fallback driver for unrecognised controllers: maps the first two axes
 // of the raw HID report to the left stick.
 static void generic_process_report(const uint8_t * report, uint16_t len) {
-    if (len < 6) return;
+    if (len < 2) return;
     XInputReport next_report = {};
     next_report.report_size = 0x14;
     next_report.thumb_lx = static_cast<int16_t>((static_cast<int>(report[0]) - 128) * 256);
