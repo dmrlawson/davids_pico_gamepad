@@ -1,4 +1,4 @@
-# Pico 2 W Gamepad Adapter
+# davids_pico_gamepad
 
 This project converts a bluetooth gamepad to USB, using the Raspberry Pi Pico 2 W. It shows up as the commonly supported Xbox 360 controller and works with force-feedback/rumble effects.
 
