@@ -1,6 +1,12 @@
 # Pico 2 W Gamepad Adapter
 
-Firmware for the Raspberry Pi Pico 2 W that acts as a Bluetooth-to-USB gamepad adapter. It connects to an **8BitDo N64 Bluetooth controller** (Nintendo Switch Online N64 mod kit) and presents it to the host PC as a **USB Xbox 360 (XInput) controller**. Rumble commands from the PC are forwarded to the controller via HD Rumble.
+This project converts a bluetooth gamepad to USB, using the Raspberry Pi Pico 2 W. It shows up as the commonly supported Xbox 360 controller and works with force-feedback/rumble effects.
+
+The idea was mainly inspired by the fantastic [blueretro](https://github.com/darthcloud/BlueRetro/) project which works incredibly well on the N64. I wanted to try to have the same thing but for PC.
+
+Currently this project only supports (or has only been tested with) the 8bitdo N64 controller mod kit as that was my main motivation to create it, however I will endeavour to support more controllers.
+
+The code was largely generated using gemini-cli and then cleaned up with Claude Code.
 
 ## Hardware
 
@@ -37,6 +43,8 @@ In `davids_pico_gamepad.cpp`:
 // false — NSO simple HID mode (0x3F): 60Hz polling, lower power
 #define USE_NSO_FULL_MODE true
 ```
+
+I'm not sure if it's worth keeping the simple HID mode but it's not much effort to keep it for now.
 
 ## License
 
