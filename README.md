@@ -11,13 +11,13 @@ The code was largely generated using gemini-cli and then cleaned up with Claude 
 ## Hardware
 
 - Raspberry Pi Pico 2 W
-- 8BitDo N64 Bluetooth controller (NSO N64, VID `057E` PID `2019`) — the mode switch on the controller must be set to **S** (Switch)
+- 8BitDo N64 Mod Kit (VID `057E` PID `2019`) — the mode switch on the controller must be set to **S** (Switch)
 
 No additional components are required. UART output on GP0/GP1 (115200 baud) provides debug logging in debug builds.
 
 ## How it works
 
-- **Core 0** runs the BTstack Bluetooth Classic HID host. On boot it scans for a nearby HID device with a peripheral class of device, connects, identifies the controller via SDP, and runs the NSO N64 handshake to enable full input mode (100Hz) and vibration.
+- **Core 0** runs the BTstack Bluetooth Classic HID host. On boot it scans for a nearby HID device with a peripheral class of device, connects, identifies the controller via SDP, and runs the 8BitDo N64 Mod Kit handshake to enable full input mode (100Hz) and vibration.
 - **Core 1** runs the TinyUSB device stack. It presents a USB XInput interface to the host PC. Incoming gamepad state is forwarded as XInput reports; incoming rumble commands are forwarded over to Core 0 to send to the controller via HD Rumble.
 
 The LED indicates connection state: off = idle, blinking = scanning/connecting, solid = connected.

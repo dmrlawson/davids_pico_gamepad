@@ -98,10 +98,10 @@ typedef struct {
 } gamepad_driver_t;
 
 //--------------------------------------------------------------------
-// NSO N64 driver
+// 8BitDo N64 Mod Kit driver
 //
-// The Nintendo Switch Online N64 controller uses a proprietary protocol
-// over Bluetooth Classic HID. After connection, an initialisation
+// The 8BitDo N64 Mod Kit emulates the Nintendo Switch Online N64 controller
+// protocol over Bluetooth Classic HID. After connection, an initialisation
 // handshake enables vibration (subcommand 0x48) and sets the input
 // report mode (subcommand 0x03). Subcommands are sent as HID output
 // report 0x01; input arrives as either:
@@ -262,7 +262,7 @@ static void nso_n64_process_report(const uint8_t * report, uint16_t len) {
 }
 
 static gamepad_driver_t nso_n64_driver = {
-    0x057E, 0x2019, "NSO N64",
+    0x057E, 0x2019, "8BitDo N64 Mod Kit",
     nso_n64_init, nso_n64_process_report, nso_n64_send_rumble_packet
 };
 
