@@ -37,6 +37,7 @@ pico_sdk_init()
 
 add_executable(davids_pico_gamepad
     davids_pico_gamepad.cpp
+    8bitdo_n64_mk.cpp
     usb_descriptors.c
 )
 
