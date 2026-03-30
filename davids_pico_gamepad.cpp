@@ -271,15 +271,17 @@ void tud_vendor_rx_cb(uint8_t itf) { (void)itf; }
 // Main (Core 0 entry point)
 //--------------------------------------------------------------------
 int main() {
+#if DEBUG_ENABLED
     stdio_init_all();
     uart_init(uart0, 115200);
     gpio_set_function(0, GPIO_FUNC_UART);
     gpio_set_function(1, GPIO_FUNC_UART);
-    sleep_ms(2000);
+    sleep_ms(500); // Brief settle time for UART
     DEBUG_LOG("\n\n--- Pico 2 W Gateway Boot ---\n");
+#endif
 
     if (cyw43_arch_init()) return -1;
-    sleep_ms(1000);
+    sleep_ms(500);
 
     l2cap_init();
     sdp_client_init();

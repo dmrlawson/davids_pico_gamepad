@@ -77,7 +77,7 @@ static void handshake_timer_handler(btstack_timer_source_t * ts) {
         uint8_t enable = 0x01;
         n64mk_send_subcommand(0x48, &enable, 1); // Enable vibration
         app_state = STATE_HANDSHAKE_2;
-        btstack_run_loop_set_timer(&s_handshake_timer, 200);
+        btstack_run_loop_set_timer(&s_handshake_timer, 100);
         btstack_run_loop_add_timer(&s_handshake_timer);
     } else if (app_state == STATE_HANDSHAKE_2) {
         uint8_t mode = USE_NSO_FULL_MODE ? 0x30 : 0x3F;
@@ -92,7 +92,7 @@ static void n64mk_init(uint16_t cid) {
     n64mk_send_subcommand(0x40, &enable, 1); // Enable HID (required before other commands)
     app_state = STATE_HANDSHAKE_1;
     btstack_run_loop_set_timer_handler(&s_handshake_timer, handshake_timer_handler);
-    btstack_run_loop_set_timer(&s_handshake_timer, 200);
+    btstack_run_loop_set_timer(&s_handshake_timer, 100);
     btstack_run_loop_add_timer(&s_handshake_timer);
 }
 
