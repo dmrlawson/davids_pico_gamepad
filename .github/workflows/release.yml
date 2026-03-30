@@ -36,7 +36,7 @@ jobs:
           PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
         run: |
           mkdir build && cd build
-          cmake -DPICO_BOARD=${{ matrix.board }} -DPROJECT_VERSION=${{ github.ref_name }} ..
+          cmake -DPICO_BOARD=${{ matrix.board }} -DPROJECT_VERSION=${{ github.ref_name }} -DCMAKE_BUILD_TYPE=Release ..
           make -j$(nproc)
           cp davids_pico_gamepad.uf2 davids_pico_gamepad-${{ matrix.board }}-${{ github.ref_name }}.uf2
 
