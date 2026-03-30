@@ -50,3 +50,4 @@ I'm not sure if it's worth keeping the simple HID mode but it's not much effort 
 
 Copyright (C) 2026 David Lawson
 Licensed under the [GNU General Public License v3.0](LICENSE) or later.
+Please see [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) for licenses regarding third-party libraries (Pico SDK, TinyUSB, and BTstack) used in this project.
