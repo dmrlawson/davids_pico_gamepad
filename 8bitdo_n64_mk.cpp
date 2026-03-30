@@ -25,9 +25,9 @@
 // false — NSO simple HID mode (0x3F): 60Hz polling, lower power
 #define USE_NSO_FULL_MODE true
 
-// HD Rumble frequency byte values (empirically chosen for good feel)
-static constexpr uint8_t HD_RUMBLE_HF_FREQ = 0x28; // ~320 Hz high-frequency component
-static constexpr uint8_t HD_RUMBLE_LF_FREQ = 0x80; // ~160 Hz low-frequency component
+// HD Rumble HF frequency byte (bits 7:0 of the 9-bit freq field; bit 8 is in msg[2] bit 0)
+// 0x28 encodes ~320 Hz, a good default for the small motor.
+static constexpr uint8_t HD_RUMBLE_HF_FREQ = 0x28;
 
 static uint8_t  s_counter = 0;
 static uint16_t s_cid     = 0;
@@ -55,11 +55,15 @@ static void n64mk_send_rumble_packet(uint16_t cid, uint8_t low, uint8_t high) {
         uint8_t hfa = high >> 1; // High-frequency amp (small motor)
         uint8_t lfa = low  >> 1; // Low-frequency amp  (large motor)
 
-        // Encode 4-byte HD Rumble sample
-        msg[1] = HD_RUMBLE_HF_FREQ;
-        msg[2] = 0x80 | (hfa & 0x7F); // HF amp; top bit marks the frequency range
-        msg[3] = HD_RUMBLE_LF_FREQ;
-        msg[4] = lfa & 0x7F;           // LF amp
+        // Encode 4-byte HD Rumble sample (layout from BlueRetro sw.h analysis):
+        //   msg[1] = HF freq[7:0]
+        //   msg[2] = HF amp[6:0] in bits[7:1], HF freq[8] in bit[0]
+        //   msg[3] = LF amp[0]   in bit[7],    LF freq[6:0] in bits[6:0]
+        //   msg[4] = tbd1 (must=1) in bit[6],  LF amp[6:1] in bits[5:0]
+        msg[1] = HD_RUMBLE_HF_FREQ;                     // HF freq[7:0] = 0x28 (~320 Hz)
+        msg[2] = (hfa & 0x7F) << 1;                     // HF amp[6:0]; freq[8]=0
+        msg[3] = 0x70 | ((lfa & 0x01) << 7);            // LF freq = 0x70 (~160 Hz); LF amp[0]
+        msg[4] = ((lfa >> 1) & 0x3F) | 0x40;            // LF amp[6:1]; tbd1=1
 
         // Protocol expects two motor slots (8 bytes total); mirror the sample
         memcpy(&msg[5], &msg[1], 4);
