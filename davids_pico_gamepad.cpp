@@ -114,7 +114,7 @@ static void handle_sdp_client_query_result(uint8_t packet_type, uint16_t channel
 static void start_scan(void) {
     DEBUG_LOG("[C0] Inquiry...\n");
     app_state = STATE_SCANNING;
-    gap_inquiry_start(8);
+    gap_inquiry_start(3); // 3 × 1.28s = 3.84s window; devices respond within 2.56s
 }
 
 static void ui_timer_handler(btstack_timer_source_t * ts) {
@@ -127,7 +127,8 @@ static void ui_timer_handler(btstack_timer_source_t * ts) {
         led_on = true;
         blink_tick = 0;
     } else if (app_state >= STATE_SCANNING && app_state <= STATE_HANDSHAKE_2) {
-        if (++blink_tick >= 50) { blink_tick = 0; led_on = !led_on; } // 50 × 5ms = 250ms
+        // 4 Hz blink: toggle every 25 × 5ms = 125ms
+        if (++blink_tick >= 25) { blink_tick = 0; led_on = !led_on; }
     } else {
         led_on = false;
         blink_tick = 0;
@@ -281,7 +282,7 @@ int main() {
 #endif
 
     if (cyw43_arch_init()) return -1;
-    sleep_ms(500);
+    sleep_ms(250);
 
     l2cap_init();
     sdp_client_init();
