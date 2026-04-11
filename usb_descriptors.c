@@ -60,11 +60,20 @@ uint8_t const desc_configuration[] =
 
   // Endpoint IN 0x81 — gamepad state reports to host (7 bytes)
   // bLength, bDescriptorType, bEndpointAddress, bmAttributes (interrupt), wMaxPacketSize, bInterval (1ms)
+  // wMaxPacketSize must be > 20 (our report size): Linux xpad submits 64-byte URBs and relies on
+  // receiving a short packet (actual_length < wMaxPacketSize) to know the transfer is done.
+  // With wMaxPacketSize=20, our 20-byte report is a full packet and the URB never completes.
   0x07, TUSB_DESC_ENDPOINT, 0x81, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x01,
 
   // Endpoint OUT 0x01 — rumble commands from host (7 bytes)
-  // bLength, bDescriptorType, bEndpointAddress, bmAttributes (interrupt), wMaxPacketSize, bInterval (4ms)
-  0x07, TUSB_DESC_ENDPOINT, 0x01, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x04
+  // bLength, bDescriptorType, bEndpointAddress, bmAttributes (interrupt), wMaxPacketSize, bInterval (1ms)
+  // wMaxPacketSize must be > the largest rumble packet (8 bytes): TinyUSB arms the endpoint
+  // for a multi-packet transfer that only completes on either a full buffer or a short
+  // packet (< wMaxPacketSize). With wMaxPacketSize=8, an 8-byte rumble packet is full-size
+  // (not short), so packets accumulate in the hardware buffer and never reach the FIFO
+  // until a gap or burst brings the total to 64 bytes. 32 matches real Xbox 360 hardware.
+  // bInterval 1ms (real Xbox 360 uses 8ms) — shorter host-to-device rumble delivery latency.
+  0x07, TUSB_DESC_ENDPOINT, 0x01, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x01
 };
 
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
@@ -163,6 +172,15 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_requ
     if (request->wIndex == 0x0005)
     {
       return tud_control_xfer(rhport, request, (void*)(uintptr_t)desc_ms_os_properties, sizeof(desc_ms_os_properties));
+    }
+    // Linux xpad driver sends a vendor IN request (bRequest=0x01, wIndex=0x00) as a
+    // "magic message" during init and expects 20 bytes back. Responding with zeros lets
+    // it succeed cleanly. Without this, tud_control_status() skips the data stage and
+    // the host times out with ETIMEDOUT, which may prevent input processing from starting.
+    if (request->bmRequestType_bit.direction == TUSB_DIR_IN && request->wIndex == 0x0000)
+    {
+      static uint8_t dummy[20] = {};
+      return tud_control_xfer(rhport, request, dummy, sizeof(dummy));
     }
   }
   return false;
