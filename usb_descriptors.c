@@ -5,6 +5,10 @@
 // The device presents a vendor-specific (XInput) interface using the
 // Microsoft-assigned VID/PID. Windows loads the built-in xusb22.sys
 // driver via the XUSB20 compatible ID in the MS OS descriptor.
+//
+// XInput descriptor structure (the 16-byte type 0x21 class descriptor,
+// endpoint layout, and bmAttributes) derived from:
+//   https://github.com/fluffymadness/tinyusb-xinput (MIT licence)
 
 #include "tusb.h"
 
@@ -44,19 +48,24 @@ uint8_t const * tud_descriptor_device_cb(void)
 //--------------------------------------------------------------------
 // Configuration Descriptor
 //--------------------------------------------------------------------
-#define CONFIG_TOTAL_LEN  (9 + 9 + 7 + 7)
+#define CONFIG_TOTAL_LEN  (9 + 9 + 16 + 7 + 7)
 
 uint8_t const desc_configuration[] =
 {
   // Configuration Descriptor (9 bytes)
   // bLength, bDescriptorType, wTotalLength, bNumInterfaces, bConfigurationValue,
-  // iConfiguration, bmAttributes (bus-powered + remote wakeup), bMaxPower (500mA)
-  0x09, TUSB_DESC_CONFIGURATION, U16_TO_U8S_LE(CONFIG_TOTAL_LEN), 0x01, 0x01, 0x00, 0xA0, 0xFA,
+  // iConfiguration, bmAttributes (bus-powered, no remote wakeup), bMaxPower (500mA)
+  0x09, TUSB_DESC_CONFIGURATION, U16_TO_U8S_LE(CONFIG_TOTAL_LEN), 0x01, 0x01, 0x00, 0x80, 0xFA,
 
   // Interface Descriptor (9 bytes)
   // bLength, bDescriptorType, bInterfaceNumber, bAlternateSetting, bNumEndpoints,
   // bInterfaceClass (vendor), bInterfaceSubClass (XInput), bInterfaceProtocol (XInput), iInterface
   0x09, TUSB_DESC_INTERFACE, 0x00, 0x00, 0x02, 0xFF, 0x5D, 0x01, 0x00,
+
+  // XInput class descriptor (16 bytes, type 0x21) — present in real Xbox 360 wired controllers.
+  // xusb22.sys reads this to identify the controller's LED/power capabilities.
+  0x10, 0x21, 0x10, 0x01, 0x01, 0x24, 0x81, 0x14,
+  0x03, 0x00, 0x03, 0x13, 0x02, 0x00, 0x03, 0x00,
 
   // Endpoint IN 0x81 — gamepad state reports to host (7 bytes)
   // bLength, bDescriptorType, bEndpointAddress, bmAttributes (interrupt), wMaxPacketSize, bInterval (1ms)
@@ -65,15 +74,16 @@ uint8_t const desc_configuration[] =
   // With wMaxPacketSize=20, our 20-byte report is a full packet and the URB never completes.
   0x07, TUSB_DESC_ENDPOINT, 0x81, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x01,
 
-  // Endpoint OUT 0x01 — rumble commands from host (7 bytes)
+  // Endpoint OUT 0x02 — rumble commands from host (7 bytes)
   // bLength, bDescriptorType, bEndpointAddress, bmAttributes (interrupt), wMaxPacketSize, bInterval (1ms)
+  // Address 0x02 matches real Xbox 360 hardware; xusb22.sys expects rumble on EP2 OUT.
   // wMaxPacketSize must be > the largest rumble packet (8 bytes): TinyUSB arms the endpoint
   // for a multi-packet transfer that only completes on either a full buffer or a short
   // packet (< wMaxPacketSize). With wMaxPacketSize=8, an 8-byte rumble packet is full-size
   // (not short), so packets accumulate in the hardware buffer and never reach the FIFO
   // until a gap or burst brings the total to 64 bytes. 32 matches real Xbox 360 hardware.
   // bInterval 1ms (real Xbox 360 uses 8ms) — shorter host-to-device rumble delivery latency.
-  0x07, TUSB_DESC_ENDPOINT, 0x01, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x01
+  0x07, TUSB_DESC_ENDPOINT, 0x02, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(32), 0x01
 };
 
 uint8_t const * tud_descriptor_configuration_cb(uint8_t index)
