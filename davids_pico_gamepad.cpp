@@ -135,10 +135,12 @@ static void ui_timer_handler(btstack_timer_source_t * ts) {
     }
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
 
-    if (rumble_dirty && app_state == STATE_CONNECTED && hid_host_cid != 0) {
-        if (current_driver->send_rumble_packet) {
+    // HD Rumble does not latch: must be sent every tick to sustain vibration.
+    // Send continuously while motors are non-zero; send one final packet on
+    // the transition to stopped (rumble_dirty with zero values).
+    if (app_state == STATE_CONNECTED && hid_host_cid != 0 && current_driver->send_rumble_packet) {
+        if (rumble_low != 0 || rumble_high != 0 || rumble_dirty) {
             current_driver->send_rumble_packet(hid_host_cid, (uint8_t)rumble_low, (uint8_t)rumble_high);
-            DEBUG_LOG("[C0] Rumble Sent\n");
             rumble_dirty = false;
         }
     }
