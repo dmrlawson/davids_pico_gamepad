@@ -229,20 +229,53 @@ void core1_main() {
     tusb_init();
 
     uint32_t last_log = to_ms_since_boot(get_absolute_time());
-    uint32_t packet_count = 0;
+    uint32_t packet_count    = 0;
+    uint32_t rumble_rx_count = 0;
 
     while (true) {
         tud_task();
 
-        // Read rumble commands from the host (XInput output report: 0x00 0x08 ... low high)
+        // Read XInput output reports from the host. byte[0]=type, byte[1]=packet size:
+        //   {0x00, 0x08, 0x00, low, high, 0x00, 0x00, 0x00} — rumble (8 bytes)
+        //   {0x01, 0x03, pattern}                            — LED    (3 bytes)
+        //
+        // The TinyUSB RX FIFO is a raw byte stream and may concatenate multiple OUT
+        // transfers (e.g. a start queued ahead of a stop within one poll window, or an
+        // LED command ahead of a rumble). Iterate packet-by-packet using the size byte —
+        // otherwise anything after the first packet is silently discarded and a queued
+        // stop can be lost, leaving the motor running indefinitely.
+        //
         if (tud_vendor_available()) {
-            uint8_t buf[64];
+            // static: CFG_TUD_VENDOR_RX_BUFSIZE is now 2048, and Core 1's default stack
+            // is also 2048. A local array here would overflow the stack.
+            static uint8_t buf[CFG_TUD_VENDOR_RX_BUFSIZE];
             uint32_t count = tud_vendor_read(buf, sizeof(buf));
-            if (count >= 5 && buf[0] == 0x00 && buf[1] == 0x08) {
-                DEBUG_LOG("[C1] Rumble RX: %02x %02x\n", buf[3], buf[4]);
-                rumble_low   = buf[3];
-                rumble_high  = buf[4];
-                rumble_dirty = true;
+
+            // Dump the raw bytes of every OUT transfer so we can cross-reference
+            // Wireshark captures against what TinyUSB actually delivered.
+            if (count > 0) {
+                DEBUG_LOG("[C1] OUT %u:", (unsigned int)count);
+                for (uint32_t j = 0; j < count && j < 500; j++) DEBUG_LOG(" %02x", buf[j]);
+                if (count > 500) DEBUG_LOG(" ...");
+                DEBUG_LOG("\n");
+            }
+
+            for (uint32_t i = 0; i + 2 <= count;) {
+                uint8_t type = buf[i];
+                uint8_t size = buf[i + 1];
+                if (size == 0 || i + size > count) {
+                    DEBUG_LOG("[C1] Skip at %u: type=%02x size=%02x rem=%u\n",
+                              (unsigned int)i, type, size, (unsigned int)(count - i));
+                    break;
+                }
+                if (type == 0x00 && size == 0x08) {
+                    DEBUG_LOG("[C1] Rumble RX: %02x %02x\n", buf[i + 3], buf[i + 4]);
+                    rumble_low   = buf[i + 3];
+                    rumble_high  = buf[i + 4];
+                    rumble_dirty = true;
+                    rumble_rx_count++;
+                }
+                i += size;
             }
         }
 
@@ -261,7 +294,8 @@ void core1_main() {
 
         uint32_t now = to_ms_since_boot(get_absolute_time());
         if (now - last_log > 5000) {
-            DEBUG_LOG("[C1] USB Packets: %u\n", (unsigned int)packet_count);
+            DEBUG_LOG("[C1] TX input: %u, RX rumble: %u\n",
+                      (unsigned int)packet_count, (unsigned int)rumble_rx_count);
             last_log = now;
         }
     }
