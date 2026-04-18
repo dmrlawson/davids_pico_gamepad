@@ -44,9 +44,11 @@
 
 // Vendor FIFO size of TX and RX (must be power of 2, and >= 64 — TinyUSB's stream
 // implementation uses TUSB_EPSIZE_BULK_FS=64 as its internal minimum packet size
-// regardless of the endpoint's wMaxPacketSize in the USB descriptor)
-#define CFG_TUD_VENDOR_RX_BUFSIZE 64
-#define CFG_TUD_VENDOR_TX_BUFSIZE 64
+// regardless of the endpoint's wMaxPacketSize in the USB descriptor).
+// RX is oversized so debug builds can block Core 1 on UART printf during bursts
+// of rumble packets without overflowing and causing the host to drop packets.
+#define CFG_TUD_VENDOR_RX_BUFSIZE 2048
+#define CFG_TUD_VENDOR_TX_BUFSIZE 2048
 
 #ifdef __cplusplus
  }
