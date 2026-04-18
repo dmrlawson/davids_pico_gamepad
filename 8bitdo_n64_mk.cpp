@@ -12,8 +12,8 @@
 //   0x30 — full mode   (100Hz, all buttons + calibrated stick data)
 //
 // Rumble is sent via HID output report 0x10 using the HD Rumble format:
-// a 4-byte payload encoding two frequency+amplitude pairs, mirrored to
-// fill an 8-byte field.
+// a tid byte followed by two independent 4-byte motor samples (left, right),
+// each encoding an HF freq+amp pair and an LF freq+amp pair.
 
 #include "8bitdo_n64_mk.h"
 
@@ -25,16 +25,21 @@
 // false — NSO simple HID mode (0x3F): 60Hz polling, lower power
 #define USE_NSO_FULL_MODE true
 
-// HD Rumble HF frequency byte (bits 7:0 of the 9-bit freq field; bit 8 is in msg[2] bit 0)
-// 0x28 encodes ~320 Hz, a good default for the small motor.
-static constexpr uint8_t HD_RUMBLE_HF_FREQ = 0x28;
+// HD Rumble frequencies. Values match BlueRetro's proven-working encoding for
+// the 8BitDo N64 Mod Kit (main/bluetooth/hidp/sw.h in darthcloud/BlueRetro).
+// HF freq is a 9-bit field; LF freq is 7 bits. Left and right motors use
+// different HF frequencies by design — both motor slots need to be driven with
+// distinct signals for the controller to respond correctly.
+static constexpr uint16_t HD_RUMBLE_L_HF_FREQ = 0x060;
+static constexpr uint16_t HD_RUMBLE_R_HF_FREQ = 0x028;
+static constexpr uint8_t  HD_RUMBLE_LF_FREQ   = 0x70;
 
 static uint8_t  s_counter = 0;
 static uint16_t s_cid     = 0;
 static btstack_timer_source_t s_handshake_timer;
 
 static void n64mk_send_subcommand(uint8_t subcmd, const uint8_t * data, uint16_t len) {
-    uint8_t msg[64];
+    static uint8_t msg[64];
     memset(msg, 0, sizeof(msg));
     msg[0] = s_counter++ & 0x0F;
     msg[1] = 0x00; msg[2] = 0x01; msg[3] = 0x40; msg[4] = 0x40; // rumble off
@@ -44,29 +49,43 @@ static void n64mk_send_subcommand(uint8_t subcmd, const uint8_t * data, uint16_t
     hid_host_send_report(s_cid, 0x01, msg, 10 + len);
 }
 
+// Map XInput amplitude (0–255) to the HD Rumble encoded amp (0–0x64).
+// Linear with a clamp: the encoded amp field's valid range is 0–100, so the
+// old `x >> 1` (range 0–127) overshot at the top and the top half of the
+// XInput range collapsed into "out of spec". A sqrt curve was tried but
+// compressed the perceivable dynamic range too far. Straight linear scaling
+// into the valid range keeps the widest amp spread the controller will accept.
+static uint8_t xinput_to_hd_amp(uint8_t x) {
+    return (uint8_t)(((uint16_t)x * 100 + 127) / 255);
+}
+
+// Encode one 4-byte HD Rumble motor sample in-place at `out`.
+// Layout (two 16-bit little-endian fields):
+//   byte 0: HF freq[7:0]
+//   byte 1: HF freq[8] in bit 0 | HF amp[6:0] in bits 7:1
+//   byte 2: LF freq[6:0] in bits 6:0 | LF amp[0] in bit 7
+//   byte 3: LF amp[6:1] in bits 5:0 | tbd1=1 in bit 6 | tbd2=0 in bit 7
+// Both HF amp and LF amp are set to the same value — the 8BitDo N64 Mod Kit
+// needs both populated to reliably activate its single motor. This mirrors
+// BlueRetro's sw_fb_from_generic encoding.
+static void encode_hd_rumble_motor(uint8_t * out, uint16_t hf_freq, uint8_t amp) {
+    out[0] = hf_freq & 0xFF;
+    out[1] = ((hf_freq >> 8) & 0x01) | ((amp & 0x7F) << 1);
+    out[2] = HD_RUMBLE_LF_FREQ | ((amp & 0x01) << 7);
+    out[3] = ((amp >> 1) & 0x3F) | 0x40;
+}
+
 static void n64mk_send_rumble_packet(uint16_t cid, uint8_t low, uint8_t high) {
-    uint8_t msg[9];
+    static uint8_t msg[9];
     msg[0] = s_counter++ & 0x0F;
     if (low == 0 && high == 0) {
         uint8_t off[] = {0x00, 0x01, 0x40, 0x40, 0x00, 0x01, 0x40, 0x40};
         memcpy(&msg[1], off, 8);
     } else {
-        // Map XInput (0–255) to NSO amplitude (0–127)
-        uint8_t hfa = high >> 1; // High-frequency amp (small motor)
-        uint8_t lfa = low  >> 1; // Low-frequency amp  (large motor)
-
-        // Encode 4-byte HD Rumble sample (layout from BlueRetro sw.h analysis):
-        //   msg[1] = HF freq[7:0]
-        //   msg[2] = HF amp[6:0] in bits[7:1], HF freq[8] in bit[0]
-        //   msg[3] = LF amp[0]   in bit[7],    LF freq[6:0] in bits[6:0]
-        //   msg[4] = tbd1 (must=1) in bit[6],  LF amp[6:1] in bits[5:0]
-        msg[1] = HD_RUMBLE_HF_FREQ;                     // HF freq[7:0] = 0x28 (~320 Hz)
-        msg[2] = (hfa & 0x7F) << 1;                     // HF amp[6:0]; freq[8]=0
-        msg[3] = 0x70 | ((lfa & 0x01) << 7);            // LF freq = 0x70 (~160 Hz); LF amp[0]
-        msg[4] = ((lfa >> 1) & 0x3F) | 0x40;            // LF amp[6:1]; tbd1=1
-
-        // Protocol expects two motor slots (8 bytes total); mirror the sample
-        memcpy(&msg[5], &msg[1], 4);
+        // XInput low (large/low-frequency motor) → left slot.
+        // XInput high (small/high-frequency motor) → right slot.
+        encode_hd_rumble_motor(&msg[1], HD_RUMBLE_L_HF_FREQ, xinput_to_hd_amp(low));
+        encode_hd_rumble_motor(&msg[5], HD_RUMBLE_R_HF_FREQ, xinput_to_hd_amp(high));
     }
     hid_host_send_report(cid, 0x10, msg, sizeof(msg));
 }
