@@ -201,6 +201,16 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
                 case HID_SUBEVENT_CONNECTION_OPENED:
                     if (hid_subevent_connection_opened_get_status(packet) == 0) {
                         hid_host_cid = hid_subevent_connection_opened_get_hid_cid(packet);
+                        // If the peer has already put the link into Sniff mode,
+                        // force it back to Active. Sniff polling intervals are
+                        // typically 50-500ms and add that much to rumble latency.
+                        hci_con_handle_t con_handle = hid_subevent_connection_opened_get_con_handle(packet);
+                        gap_sniff_mode_exit(con_handle);
+                        // Cap baseband packet retransmission at ~40ms. Default is
+                        // infinite: a stuck packet blocks everything behind it
+                        // until it finally ACKs, adding 100s of ms to any rumble
+                        // update queued during a bad burst. 64 * 0.625ms = 40ms.
+                        hci_send_cmd(&hci_write_automatic_flush_timeout, con_handle, 64);
                         DEBUG_LOG("[C0] Connected\n");
                         app_state = STATE_IDENTIFYING;
                         sdp_client_query_uuid16(&handle_sdp_client_query_result, remote_addr, 0x1200);
@@ -332,6 +342,11 @@ int main() {
 
     l2cap_init();
     sdp_client_init();
+    // Default is ROLE_SWITCH | SNIFF_MODE; drop SNIFF so new connections stay
+    // in Active mode. Sniff is a power-save mode where the radio only listens
+    // every N slots (50-500ms typical), which is latency we can't afford for
+    // rumble. We're USB-powered so no downside to full-power polling.
+    gap_set_default_link_policy_settings(LM_LINK_POLICY_ENABLE_ROLE_SWITCH);
     hid_host_init(hid_descriptor_storage, sizeof(hid_descriptor_storage));
     hid_host_register_packet_handler(packet_handler);
     hci_event_callback_registration.callback = &packet_handler;
