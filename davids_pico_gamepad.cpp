@@ -54,11 +54,13 @@ static volatile bool usb_report_dirty = false;
 
 #define RUMBLE_SEND_INTERVAL  3   // every 3rd tick = 15ms → ~67Hz (close to the Switch's 60Hz HD Rumble rate)
 
-static volatile uint8_t rumble_low  = 0;
-static volatile uint8_t rumble_high = 0;
-static uint8_t          rumble_send_tick      = 0;
-static uint8_t          rumble_last_sent_low  = 0;
-static uint8_t          rumble_last_sent_high = 0;
+static volatile uint8_t  rumble_low  = 0;
+static volatile uint8_t  rumble_high = 0;
+static volatile uint32_t rumble_change_ts_ms = 0; // Core 1 stamps when values change
+static uint8_t           rumble_send_tick      = 0;
+static uint8_t           rumble_last_sent_low  = 0;
+static uint8_t           rumble_last_sent_high = 0;
+static uint32_t          rumble_tx_ts_ms       = 0; // Core 0 stamps when BT queue is asked to send
 
 //--------------------------------------------------------------------
 // Bluetooth state (Core 0 only)
@@ -152,6 +154,13 @@ static void ui_timer_handler(btstack_timer_source_t * ts) {
             rumble_send_tick = 0;
             rumble_last_sent_low  = low;
             rumble_last_sent_high = high;
+            uint32_t now = to_ms_since_boot(get_absolute_time());
+            uint32_t rx_ts = rumble_change_ts_ms;
+            if (changed) {
+                DEBUG_LOG("[C0] Rumble TX: %02x %02x (%u ms after USB RX)\n",
+                          low, high, (unsigned)(now - rx_ts));
+                rumble_tx_ts_ms = now;
+            }
             current_driver->send_rumble_packet(hid_host_cid, low, high);
         }
     }
@@ -178,6 +187,26 @@ static void packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packe
             hci_event_pin_code_request_get_bd_addr(packet, addr);
             hci_send_cmd(&hci_pin_code_request_negative_reply, addr);
             break;
+        case HCI_EVENT_NUMBER_OF_COMPLETED_PACKETS: {
+            // Fired when the local BT controller confirms a packet was sent on
+            // air and ACK'd by the peer. If a rumble TX is pending, log the delta:
+            // that's "queued by our stack" → "peer confirmed received".
+            if (rumble_tx_ts_ms != 0) {
+                uint32_t now = to_ms_since_boot(get_absolute_time());
+                DEBUG_LOG("[C0] Rumble ACK: %u ms after TX queue\n",
+                          (unsigned)(now - rumble_tx_ts_ms));
+                rumble_tx_ts_ms = 0;
+            }
+            break;
+        }
+        case HCI_EVENT_MODE_CHANGE: {
+            // mode: 0=active, 1=hold, 2=sniff, 3=park. interval in 0.625ms units.
+            uint8_t mode = hci_event_mode_change_get_mode(packet);
+            uint16_t interval = hci_event_mode_change_get_interval(packet);
+            DEBUG_LOG("[C0] Mode change: mode=%u interval=%u (%.2f ms)\n",
+                      mode, interval, interval * 0.625);
+            break;
+        }
         case GAP_EVENT_INQUIRY_RESULT:
             gap_event_inquiry_result_get_bd_addr(packet, addr);
             if ((gap_event_inquiry_result_get_class_of_device(packet) & 0x1F00) == 0x0500) {
@@ -290,9 +319,15 @@ void core1_main() {
                     break;
                 }
                 if (type == 0x00 && size == 0x08) {
-                    DEBUG_LOG("[C1] Rumble RX: %02x %02x\n", buf[i + 3], buf[i + 4]);
-                    rumble_low   = buf[i + 3];
-                    rumble_high  = buf[i + 4];
+                    uint8_t new_low  = buf[i + 3];
+                    uint8_t new_high = buf[i + 4];
+                    if (new_low != rumble_low || new_high != rumble_high) {
+                        rumble_change_ts_ms = to_ms_since_boot(get_absolute_time());
+                    }
+                    DEBUG_LOG("[C1] Rumble RX: %02x %02x at %u ms\n",
+                              new_low, new_high, (unsigned)to_ms_since_boot(get_absolute_time()));
+                    rumble_low  = new_low;
+                    rumble_high = new_high;
                     rumble_rx_count++;
                 }
                 i += size;
