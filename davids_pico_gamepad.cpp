@@ -52,9 +52,13 @@
 static XInputReport usb_report;
 static volatile bool usb_report_dirty = false;
 
-static volatile uint8_t rumble_low   = 0;
-static volatile uint8_t rumble_high  = 0;
-static volatile bool    rumble_dirty = false;
+#define RUMBLE_SEND_INTERVAL  3   // every 3rd tick = 15ms → ~67Hz (close to the Switch's 60Hz HD Rumble rate)
+
+static volatile uint8_t rumble_low  = 0;
+static volatile uint8_t rumble_high = 0;
+static uint8_t          rumble_send_tick      = 0;
+static uint8_t          rumble_last_sent_low  = 0;
+static uint8_t          rumble_last_sent_high = 0;
 
 //--------------------------------------------------------------------
 // Bluetooth state (Core 0 only)
@@ -135,13 +139,20 @@ static void ui_timer_handler(btstack_timer_source_t * ts) {
     }
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
 
-    // HD Rumble does not latch: must be sent every tick to sustain vibration.
-    // Send continuously while motors are non-zero; send one final packet on
-    // the transition to stopped (rumble_dirty with zero values).
+    // HD Rumble: the controller needs a continuous stream of packets to sustain the
+    // motor state (matching the Switch, which sends HD Rumble at ~60Hz bundled with
+    // input polling). Sustain at ~67Hz, but when the value changes fire on the very
+    // next 5ms tick instead of waiting up to 15ms — cuts rumble start/stop latency
+    // from up to 15ms down to 5ms at the cost of a few extra packets on transitions.
     if (app_state == STATE_CONNECTED && hid_host_cid != 0 && current_driver->send_rumble_packet) {
-        if (rumble_low != 0 || rumble_high != 0 || rumble_dirty) {
-            current_driver->send_rumble_packet(hid_host_cid, (uint8_t)rumble_low, (uint8_t)rumble_high);
-            rumble_dirty = false;
+        uint8_t low  = rumble_low;
+        uint8_t high = rumble_high;
+        bool changed = (low != rumble_last_sent_low) || (high != rumble_last_sent_high);
+        if (changed || ++rumble_send_tick >= RUMBLE_SEND_INTERVAL) {
+            rumble_send_tick = 0;
+            rumble_last_sent_low  = low;
+            rumble_last_sent_high = high;
+            current_driver->send_rumble_packet(hid_host_cid, low, high);
         }
     }
 
@@ -272,7 +283,6 @@ void core1_main() {
                     DEBUG_LOG("[C1] Rumble RX: %02x %02x\n", buf[i + 3], buf[i + 4]);
                     rumble_low   = buf[i + 3];
                     rumble_high  = buf[i + 4];
-                    rumble_dirty = true;
                     rumble_rx_count++;
                 }
                 i += size;
