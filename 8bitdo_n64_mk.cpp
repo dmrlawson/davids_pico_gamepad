@@ -21,9 +21,13 @@
 #include "btstack.h"
 #include "classic/hid_host.h"
 
-// true  — NSO full input mode (0x30): 100Hz polling, calibrated stick data
-// false — NSO simple HID mode (0x3F): 60Hz polling, lower power
-#define USE_NSO_FULL_MODE true
+// true  — NSO full input mode (0x30): 100Hz polling, calibrated 12-bit sticks
+// false — NSO simple HID mode (0x3F): 60Hz polling, 8-bit sticks, less MCU work
+//
+// BlueRetro leaves the controller in simple mode (SW_SET_NATIVE_EN is disabled
+// in their build), which matches real N64 joystick resolution anyway (~128
+// steps) and leaves the controller MCU with more headroom to service rumble.
+#define USE_NSO_FULL_MODE false
 
 // HD Rumble frequencies. Values match BlueRetro's proven-working encoding for
 // the 8BitDo N64 Mod Kit (main/bluetooth/hidp/sw.h in darthcloud/BlueRetro).
@@ -107,8 +111,12 @@ static void handshake_timer_handler(btstack_timer_source_t * ts) {
 
 static void n64mk_init(uint16_t cid) {
     s_cid = cid;
-    uint8_t enable = 0x01;
-    n64mk_send_subcommand(0x40, &enable, 1); // Enable HID (required before other commands)
+    // Don't enable the IMU (subcmd 0x40). Previous code mislabelled this as
+    // "enable HID" but 0x40 is ENABLE_IMU in the NSO protocol, which runs the
+    // controller's 6-axis motion sensor at ~800Hz and bundles data into every
+    // input report. In simple mode (0x3F) we never see the IMU data anyway,
+    // but the controller's MCU keeps sampling and processing it — continuous
+    // load we don't need. BlueRetro explicitly omits this step.
     app_state = STATE_HANDSHAKE_1;
     btstack_run_loop_set_timer_handler(&s_handshake_timer, handshake_timer_handler);
     btstack_run_loop_set_timer(&s_handshake_timer, 100);
