@@ -345,16 +345,22 @@ void core1_main() {
             }
         }
 
-        // Forward the latest gamepad state to the host
-        if (tud_ready() && usb_report_dirty) {
-            if (tud_vendor_write_available() >= sizeof(XInputReport)) {
-                XInputReport report_copy;
-                memcpy(&report_copy, (void*)&usb_report, sizeof(XInputReport));
-                if (tud_vendor_write(&report_copy, sizeof(XInputReport))) {
-                    tud_vendor_flush();
-                    usb_report_dirty = false;
-                    packet_count++;
-                }
+        // Forward the latest gamepad state to the host. Only queue a new report
+        // when the TX FIFO is fully drained — i.e. the previous report has
+        // actually been transmitted. Otherwise reports accumulate in the FIFO
+        // while the host isn't polling (driver not bound, app starting), and
+        // get replayed in historical order when the host later catches up. By
+        // gating on an empty FIFO, the host always sees the current state and
+        // never a backlog of stale snapshots; Core 0 keeps overwriting
+        // usb_report so the next write picks up the latest.
+        if (tud_ready() && usb_report_dirty
+            && tud_vendor_write_available() == CFG_TUD_VENDOR_TX_BUFSIZE) {
+            XInputReport report_copy;
+            memcpy(&report_copy, (void*)&usb_report, sizeof(XInputReport));
+            if (tud_vendor_write(&report_copy, sizeof(XInputReport))) {
+                tud_vendor_flush();
+                usb_report_dirty = false;
+                packet_count++;
             }
         }
 
