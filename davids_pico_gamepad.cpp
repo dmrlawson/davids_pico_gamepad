@@ -52,10 +52,15 @@
 static XInputReport usb_report;
 static volatile bool usb_report_dirty = false;
 
-#define RUMBLE_SEND_INTERVAL  3   // every 3rd tick = 15ms → ~67Hz (close to the Switch's 60Hz HD Rumble rate)
+// Rumble pipeline: Core 1 sets rumble_pending on every USB OUT, Core 0
+// forwards it as one BT packet on the next 1ms tick (event-driven fast path).
+// In addition, while the motor is active, a sustain timer re-sends the current
+// values so the motor doesn't stop between host re-sends.
+#define RUMBLE_SEND_INTERVAL   20  // every 20th tick = 20ms → ~50Hz sustain
 
 static volatile uint8_t  rumble_low  = 0;
 static volatile uint8_t  rumble_high = 0;
+static volatile bool     rumble_pending = false;
 static volatile uint32_t rumble_change_ts_ms = 0; // Core 1 stamps when values change
 static uint8_t           rumble_send_tick      = 0;
 static uint8_t           rumble_last_sent_low  = 0;
@@ -127,45 +132,50 @@ static void ui_timer_handler(btstack_timer_source_t * ts) {
     static bool led_on = false;
     static uint32_t hb = 0;
     static uint32_t blink_tick = 0;
+    // 1000 × 1ms = 1s heartbeat
     if (++hb >= 1000) { hb = 0; DEBUG_LOG("[C0] State: %d\n", (int)app_state); }
 
     if (app_state == STATE_CONNECTED) {
         led_on = true;
         blink_tick = 0;
     } else if (app_state >= STATE_SCANNING && app_state <= STATE_HANDSHAKE_2) {
-        // 4 Hz blink: toggle every 25 × 5ms = 125ms
-        if (++blink_tick >= 25) { blink_tick = 0; led_on = !led_on; }
+        // 4 Hz blink: toggle every 125 × 1ms = 125ms
+        if (++blink_tick >= 125) { blink_tick = 0; led_on = !led_on; }
     } else {
         led_on = false;
         blink_tick = 0;
     }
     cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, led_on);
 
-    // HD Rumble: the controller needs a continuous stream of packets to sustain the
-    // motor state (matching the Switch, which sends HD Rumble at ~60Hz bundled with
-    // input polling). Sustain at ~67Hz, but when the value changes fire on the very
-    // next 5ms tick instead of waiting up to 15ms — cuts rumble start/stop latency
-    // from up to 15ms down to 5ms at the cost of a few extra packets on transitions.
+    // Rumble: fire immediately on any pending USB OUT (event-driven fast path),
+    // otherwise fire at the ~50Hz sustain interval to keep the motor alive
+    // between host re-sends. Skip if the motor is already idle.
     if (app_state == STATE_CONNECTED && hid_host_cid != 0 && current_driver->send_rumble_packet) {
-        uint8_t low  = rumble_low;
-        uint8_t high = rumble_high;
-        bool changed = (low != rumble_last_sent_low) || (high != rumble_last_sent_high);
-        if (changed || ++rumble_send_tick >= RUMBLE_SEND_INTERVAL) {
+        bool due_sustain = (++rumble_send_tick >= RUMBLE_SEND_INTERVAL);
+        if (rumble_pending || due_sustain) {
             rumble_send_tick = 0;
-            rumble_last_sent_low  = low;
-            rumble_last_sent_high = high;
-            uint32_t now = to_ms_since_boot(get_absolute_time());
-            uint32_t rx_ts = rumble_change_ts_ms;
-            if (changed) {
-                DEBUG_LOG("[C0] Rumble TX: %02x %02x (%u ms after USB RX)\n",
-                          low, high, (unsigned)(now - rx_ts));
-                rumble_tx_ts_ms = now;
+            uint8_t low  = rumble_low;
+            uint8_t high = rumble_high;
+            rumble_pending = false;
+            bool idle = (low == 0) && (high == 0)
+                     && (rumble_last_sent_low == 0) && (rumble_last_sent_high == 0);
+            if (!idle) {
+                bool changed = (low != rumble_last_sent_low) || (high != rumble_last_sent_high);
+                rumble_last_sent_low  = low;
+                rumble_last_sent_high = high;
+                if (changed) {
+                    uint32_t now = to_ms_since_boot(get_absolute_time());
+                    uint32_t rx_ts = rumble_change_ts_ms;
+                    DEBUG_LOG("[C0] Rumble TX: %02x %02x (%u ms after USB RX)\n",
+                              low, high, (unsigned)(now - rx_ts));
+                    rumble_tx_ts_ms = now;
+                }
+                current_driver->send_rumble_packet(hid_host_cid, low, high);
             }
-            current_driver->send_rumble_packet(hid_host_cid, low, high);
         }
     }
 
-    btstack_run_loop_set_timer(ts, 5); // 5ms UI/rumble poll interval
+    btstack_run_loop_set_timer(ts, 1); // 1ms UI/rumble poll interval
     btstack_run_loop_add_timer(ts);
 }
 
@@ -328,6 +338,7 @@ void core1_main() {
                               new_low, new_high, (unsigned)to_ms_since_boot(get_absolute_time()));
                     rumble_low  = new_low;
                     rumble_high = new_high;
+                    rumble_pending = true;
                     rumble_rx_count++;
                 }
                 i += size;
